@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"> 
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Martin Armstrong ECM (V25.0 - Pure English)</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif, Arial; 
+            background: #f4f4f4; text-align: center; padding: 20px; color: #333; 
+        }
+        .container { max-width: 1500px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h1 { color: #1a5e9f; font-size: 26px; margin: 15px 0; }
+        canvas { border: 3px solid #1a5e9f; background: #fff; cursor: crosshair; margin: 20px 0; border-radius: 8px; }
+        .controls { margin-bottom: 20px; }
+        input { padding: 8px; width: 100px; text-align: center; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 10px 20px; background: #1a5e9f; color: white; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; }
+        button:hover { background: #154b7c; }
+
+        /* Results & Advice Styles (Tighter Spacing) */
+        #result { margin-top: 20px; padding: 20px; background: #e6f7ff; border-radius: 8px; text-align: left; line-height: 1.6; border: 1px solid #1a5e9f; }
+        .asset-advice { margin-top: 15px; padding-top: 10px; border-top: 1px dashed #aaa; }
+        .advice-item { 
+            display: flex; 
+            padding: 5px 0; 
+            border-bottom: 1px dotted #eee; 
+            align-items: center; 
+        }
+        .advice-item strong { 
+            color: #1a5e9f; 
+            min-width: 85px; 
+            text-align: left;
+            margin-right: 10px; 
+        }
+        .advice-item span {
+            flex-grow: 0; 
+            text-align: left; 
+        }
+        
+        /* Specific Advice Colors */
+        .A_strong_buy { background-color: #d4edda; color: #155724; font-weight: bold; padding: 2px 5px; border-radius: 3px; }
+        .A_buy { background-color: #fff3cd; color: #856404; font-weight: bold; padding: 2px 5px; border-radius: 3px; }
+        .A_reduce { background-color: #f8d7da; color: #721c24; font-weight: bold; padding: 2px 5px; border-radius: 3px; }
+        .A_low { background-color: #e2e3e5; color: #383d41; padding: 2px 5px; border-radius: 3px; }
+
+        /* Tooltip Styles (Tighter Spacing) */
+        #tooltip {
+            position: absolute; display: none; background: rgba(0,0,0,0.95); color: white; 
+            padding: 12px 15px; border-radius: 8px; pointer-events: none; text-align: left; font-size: 15px; 
+            z-index: 1000; box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            line-height: 1.5;
+        }
+        #tooltip strong { color: #ffcc00; }
+        .tooltip-value { font-size: 18px; margin: 5px 0; }
+        .tooltip-advice { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #666; }
+        .tooltip-advice div { 
+            margin-top: 3px; 
+            display: flex; 
+            align-items: flex-start;
+        }
+        .tooltip-advice div strong { 
+            color: #ffcc00; 
+            font-weight: normal; 
+            min-width: 65px; 
+            margin-right: 8px; 
+        }
+        .tooltip-advice div span {
+            flex-grow: 1; 
+        }
+
+        /* Event Specific Tooltip Styles */
+        .event-title { font-size: 18px; color: #ff9999; font-weight: bold; margin-bottom: 5px;}
+        .event-desc { color: #ccc; margin-top: 5px; font-style: italic; font-size: 14px;}
+        .event-advice-header { font-size: 16px; color: #99ccff; font-weight: bold; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Martin Armstrong ECM Model (V25.0 - Pure English)</h1>
+    
+    <div class="controls">
+        <label>Query Year: <input type="number" id="queryYear" value="2025.92" step="0.01"></label>
+        <label>Start Year: <input type="number" id="startYear" value="1920"></label>
+        <label>End Year: <input type="number" id="endYear" value="2060"></label>
+        <button onclick="renderChart()">Update Chart & Advice</button>
+    </div>
+
+    <div id="result"></div>
+    <canvas id="ecmCanvas" width="1400" height="600"></canvas>
+    <div id="tooltip"></div>
+
+    <div id="eventList">
+        <h3>Key ECM Events List</h3>
+        <table id="eventTable">
+            <thead><tr><th>Date</th><th>Decimal Year</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // --- CORE CONSTANTS ---
+    const PEAK_ANCHOR_8_6 = 2032.95; 
+    const PERIOD_8_6 = 8.6;
+    const SHIFT_ANCHOR_51_6 = 1985.65; 
+    const PHASE_LENGTH_51_6 = 51.6; 
+    const EVENT_MARKER_SIZE = 6; 
+
+    const WAVE_SHAPE = [
+        { t: 0.0, v: 1.0 },   
+        { t: 1.075, v: -0.25 }, 
+        { t: 3.225, v: 0.4 }, 
+        { t: 4.3, v: -1.0 },  
+        { t: 5.375, v: 0.5 }, 
+        { t: 7.525, v: 0.0 },
+        { t: 8.6, v: 1.0 }    
+    ];
+
+    // --- EVENTS DATA (Expanded Historical Events - All English) ---
+    const EVENTS = [
+        { y: 1921.15, type: 'Trough', desc: 'Post-WWI Depression Low' },
+        { y: 1929.75, type: 'Peak', desc: '1929 Crash / Great Depression Start' },
+        { y: 1933.96, type: 'Shift', desc: 'Shift: Private Wave Ends -> Public Wave Begins' },
+        { y: 1937.00, type: 'Peak', desc: 'Pre-WWII Recession Peak' },
+        { y: 1943.40, type: 'Trough', desc: 'WWII Low / Bretton Woods Prep' },
+        { y: 1966.55, type: 'Trough', desc: 'Credit Crunch / Great Society Costs' }, 
+        { y: 1980.50, type: 'Peak', desc: 'Gold/Silver Bubble Peak' },
+        { y: 1985.65, type: 'Shift', desc: 'Shift: Public Wave Ends -> Private Wave Begins (1985.65)' },
+        { y: 1987.90, type: 'Peak', desc: 'Black Monday Crash Peak' },
+        { y: 1994.40, type: 'Peak', desc: 'Bond Market Crash / Mexican Peso Crisis' },
+        { y: 2002.85, type: 'Trough', desc: 'Dot-com Bubble Bottom' },
+        { y: 2007.15, type: 'Peak', desc: 'Real Estate Peak / GFC' },
+        { y: 2011.45, type: 'Trough', desc: 'Eurozone Debt Crisis Peak' }, 
+        { y: 2020.05, type: 'Trough', desc: 'Pandemic Crisis Low' },
+        { y: 2024.35, type: 'Peak', desc: 'Inflation/Commodity Peak' },
+        { y: 2025.25, type: 'Neutral', desc: 'April 2025 Tariff Event (Geopolitical)' },
+        { y: 2028.65, type: 'Trough', desc: 'Forecast: Major Economic Low' },
+        { y: 2032.95, type: 'Peak', desc: 'Forecast: Climax Peak (8.6y/309.6y)' },
+        { y: 2037.25, type: 'Shift', desc: 'Shift: Private Wave Ends -> Public Wave Begins (2037.25)' },
+        { y: 2045.85, type: 'Trough', desc: 'Forecast: Cycle Low' },
+    ];
+
+    let canvas, ctx;
+    let width, height, pxPerYear, startY, endY, centerY, scaleY;
+
+    function init() {
+        const now = new Date();
+        const start = new Date(now.getFullYear(), 0, 0);
+        const diff = now - start;
+        const oneDay = 1000 * 60 * 60 * 24;
+        const day = Math.floor(diff / oneDay);
+        document.getElementById('queryYear').value = (now.getFullYear() + day/365).toFixed(4);
+        
+        canvas = document.getElementById('ecmCanvas');
+        canvas.addEventListener('mousemove', handleMouseMove);
+        canvas.addEventListener('mouseout', () => document.getElementById('tooltip').style.display = 'none');
+        
+        renderChart();
+    }
+    
+    function getDecimalDate(val) {
+        let year = Math.floor(val);
+        let remainder = val - year;
+        let date = new Date(year, 0, 1 + Math.round(remainder * 365));
+        return `${date.getFullYear()}.${(date.getMonth() + 1).toString().padStart(2, '0')}.${date.getDate().toString().padStart(2, '0')}`;
+    }
+
+    function get86Value(year) {
+        let dist = year - PEAK_ANCHOR_8_6;
+        let pos = dist % PERIOD_8_6;
+        if (pos < 0) pos += PERIOD_8_6;
+
+        for (let i = 0; i < WAVE_SHAPE.length - 1; i++) {
+            let p1 = WAVE_SHAPE[i];
+            let p2 = WAVE_SHAPE[i+1];
+            if (pos >= p1.t && pos <= p2.t) {
+                let ratio = (pos - p1.t) / (p2.t - p1.t);
+                return p1.v + ratio * (p2.v - p1.v);
+            }
+        }
+        return 0;
+    }
+
+    function getPhaseInfo(year) {
+        let dist = year - SHIFT_ANCHOR_51_6;
+        let blockIndex = Math.floor(dist / PHASE_LENGTH_51_6);
+        let isPrivate = (Math.abs(blockIndex) % 2 === 0);
+        
+        return {
+            isPrivate: isPrivate,
+            name: isPrivate ? "Private Confidence Wave (Growth/Capital Flow)" : "Public Confidence Wave (Crisis/Government Intervention)",
+            color: isPrivate ? "rgba(0, 150, 0, 0.08)" : "rgba(200, 0, 0, 0.08)", 
+            labelColor: isPrivate ? "#006400" : "#8b0000"
+        };
+    }
+
+    function getAdviceClass(adviceText) {
+        if (adviceText.includes('Strong Buy') || adviceText.includes('Accumulate')) return 'A_strong_buy';
+        if (adviceText.includes('Buy') || adviceText.includes('Hold')) return 'A_buy';
+        if (adviceText.includes('Reduce') || adviceText.includes('Sell')) return 'A_reduce';
+        return 'A_low';
+    }
+
+    function getAssetAdvice(coreValue, isPrivateWave) {
+        let realEstate, stocks, gold, bonds, cash;
+
+        const nearPeak = coreValue > 0.8;
+        const nearTrough = coreValue < -0.8;
+        
+        if (isPrivateWave) {
+            realEstate = nearPeak ? 'Reduce Exposure' : nearTrough ? 'Strong Buy' : 'Accumulate Steadily';
+            stocks = nearPeak ? 'Reduce/Take Profit' : nearTrough ? 'Strong Buy (Max Opportunity)' : 'Buy/Hold';
+            gold = nearPeak ? 'Hold/Neutral' : nearTrough ? 'Low/Sell' : 'Reduce Allocation';
+            bonds = 'Low Allocation (Inflation Risk)';
+            cash = nearPeak ? 'Increase Reserve' : 'Low Allocation';
+        } 
+        else {
+            realEstate = nearPeak ? 'Sell/Exit' : nearTrough ? 'Accumulate Selectively' : 'Hold Low';
+            stocks = nearPeak ? 'Reduce/Sell Cyclicals' : nearTrough ? 'Buy Defensives' : 'Avoid/Low Allocation';
+            gold = nearTrough ? 'Strong Buy (Crisis Hedge)' : 'Accumulate Steadily';
+            gold = nearPeak ? 'Hold/Reduce (Short-term Peak)' : gold;
+            bonds = nearTrough ? 'Buy Long-Term Gov\'t' : 'Hold/Short-Term';
+            cash = nearTrough ? 'Decrease (Deployment)' : 'High Allocation (Wait for Crisis)';
+        }
+
+        return { realEstate, stocks, gold, bonds, cash };
+    }
+
+
+    // --- CHART DRAWING FUNCTIONS ---
+
+    function drawBackgrounds() {
+        let indexOffset = Math.floor((startY - SHIFT_ANCHOR_51_6) / PHASE_LENGTH_51_6);
+        let curr = SHIFT_ANCHOR_51_6 + indexOffset * PHASE_LENGTH_51_6;
+        
+        if (curr > startY) {
+            curr -= PHASE_LENGTH_51_6;
+        }
+
+        while (curr < endY) {
+            let next = curr + PHASE_LENGTH_51_6;
+            let info = getPhaseInfo(curr + 1); 
+            
+            let x1 = (curr - startY) * pxPerYear;
+            let x2 = (next - startY) * pxPerYear;
+            
+            if (x2 > 0 && x1 < width) {
+                ctx.fillStyle = info.color;
+                ctx.fillRect(x1, 0, x2 - x1, height);
+                
+                ctx.fillStyle = info.labelColor;
+                ctx.font = "bold 16px Arial";
+                ctx.textAlign = "center";
+                ctx.fillText(info.name.split(' (')[0], (x1 + x2)/2, 30);
+                ctx.font = "12px Arial";
+                ctx.fillText(`(${curr.toFixed(2)} to ${next.toFixed(2)})`, (x1 + x2)/2, 45);
+            }
+            curr = next;
+        }
+    }
+
+    function drawShiftLines() {
+        let indexOffset = Math.floor((startY - SHIFT_ANCHOR_51_6) / PHASE_LENGTH_51_6);
+        let curr = SHIFT_ANCHOR_51_6 + indexOffset * PHASE_LENGTH_51_6;
+        if (curr > startY) {
+            curr -= PHASE_LENGTH_51_6;
+        }
+
+        while (curr < endY) {
+            let x = (curr - startY) * pxPerYear;
+            if (x >= 0 && x <= width) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, height);
+                ctx.strokeStyle = "#00f";
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            curr += PHASE_LENGTH_51_6;
+        }
+    }
+    
+    function drawGrid() {
+        ctx.strokeStyle = "#ccc";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        ctx.lineTo(width, centerY);
+        ctx.stroke();
+        
+        ctx.fillStyle = "#333";
+        ctx.textAlign = "center";
+        for (let y = Math.ceil(startY/5)*5; y < endY; y+=5) {
+            let x = (y - startY) * pxPerYear;
+            ctx.fillText(y, x, height - 10);
+            ctx.beginPath(); ctx.moveTo(x, centerY-3); ctx.lineTo(x, centerY+3); ctx.stroke();
+        }
+        ctx.textAlign = "left";
+        ctx.font = "bold 14px Arial";
+        ctx.fillText("+1 (Peak)", 5, centerY - scaleY + 15);
+        ctx.fillText("-1 (Trough)", 5, centerY + scaleY - 10);
+    }
+
+    function drawWave() {
+        ctx.beginPath();
+        ctx.strokeStyle = "black";
+        ctx.lineWidth = 3;
+        
+        for (let x = 0; x < width; x++) {
+            let year = startY + (x / pxPerYear);
+            let val = get86Value(year);
+            let y = centerY - (val * scaleY);
+            if (x===0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+    
+    function drawEvents() {
+        EVENTS.forEach(e => {
+            if (e.y >= startY && e.y <= endY) {
+                let x = (e.y - startY) * pxPerYear;
+                let val = get86Value(e.y);
+                let y = centerY - (val * scaleY);
+                
+                e.xPos = x;
+                e.yPos = y;
+                e.value = val;
+
+                ctx.beginPath();
+                ctx.arc(x, y, EVENT_MARKER_SIZE, 0, Math.PI*2);
+                
+                if (e.type === 'Peak') ctx.fillStyle = 'red';
+                else if (e.type === 'Trough') ctx.fillStyle = 'blue';
+                else if (e.type === 'Shift') ctx.fillStyle = 'orange';
+                else ctx.fillStyle = 'purple'; 
+                
+                ctx.fill();
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+        });
+    }
+
+    function drawQueryLine(year) {
+        if (year < startY || year > endY) return;
+        let x = (year - startY) * pxPerYear;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = 3;
+        ctx.setLineDash([10, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
+        ctx.fillStyle = "#000";
+        ctx.font = 'bold 16px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(`Query: ${getDecimalDate(year)}`, x + 10, 20);
+    }
+
+    // --- MAIN RENDER AND UPDATE ---
+
+    function renderChart() {
+        try {
+            ctx = canvas.getContext('2d');
+            width = canvas.width;
+            height = canvas.height;
+            
+            startY = parseFloat(document.getElementById('startYear').value);
+            endY = parseFloat(document.getElementById('endYear').value);
+            let qYear = parseFloat(document.getElementById('queryYear').value);
+            
+            if (isNaN(startY) || isNaN(endY) || startY >= endY) {
+                ctx.clearRect(0, 0, width, height);
+                ctx.fillStyle = 'red';
+                ctx.font = '20px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText("Error: Invalid year range.", width / 2, height / 2);
+                return;
+            }
+
+            pxPerYear = width / (endY - startY);
+            centerY = height / 2;
+            scaleY = (height / 2) - 40;
+
+            ctx.clearRect(0, 0, width, height);
+
+            drawBackgrounds();
+            drawShiftLines();
+            drawGrid();
+            drawWave();
+            drawEvents(); 
+            drawQueryLine(qYear);
+
+            updateResultText(qYear);
+            updateEventTable();
+        } catch (error) {
+            console.error("Chart Rendering Error:", error);
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = 'red';
+            ctx.font = '20px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText("Chart rendering failed. Check browser console for details.", width / 2, height / 2);
+        }
+    }
+
+    function updateResultText(year) {
+        let val = get86Value(year);
+        let phase = getPhaseInfo(year);
+        let advice = getAssetAdvice(val, phase.isPrivate);
+        let dateStr = getDecimalDate(year);
+        
+        let status = "";
+        if (val > 0.8) status = `<span style="color:#8b0000; font-weight:bold">Near Cycle Peak (+1) - High Reversal Risk</span>`;
+        else if (val < -0.8) status = `<span style="color:#006400; font-weight:bold">Near Cycle Trough (-1) - High Buying Opportunity</span>`;
+        else status = "Mid-Cycle (Hold/Trade)";
+
+        document.getElementById('result').innerHTML = `
+            <h2>Result: ${dateStr} (${year.toFixed(4)})</h2>
+            <p><strong>51.6 Year Phase:</strong> <span style="color:${phase.labelColor}; font-size: 20px;">${phase.name.split(' (')[0]}</span></p>
+            <p><strong>8.6 Year Cycle Value:</strong> ${val.toFixed(2)} (${status})</p>
+            
+            <div class="asset-advice">
+                <h4>Martin Armstrong Investment Advice</h4>
+                <div class="advice-item"><strong>Real Estate:</strong> <span class="${getAdviceClass(advice.realEstate)}">${advice.realEstate}</span></div>
+                <div class="advice-item"><strong>Stocks:</strong> <span class="${getAdviceClass(advice.stocks)}">${advice.stocks}</span></div>
+                <div class="advice-item"><strong>Gold:</strong> <span class="${getAdviceClass(advice.gold)}">${advice.gold}</span></div>
+                <div class="advice-item"><strong>Bonds:</strong> <span class="${getAdviceClass(advice.bonds)}">${advice.bonds}</span></div>
+                <div class="advice-item"><strong>Cash:</strong> <span class="${getAdviceClass(advice.cash)}">${advice.cash}</span></div>
+            </div>
+        `;
+    }
+
+    function updateEventTable() {
+        let tbody = document.querySelector("#eventTable tbody");
+        tbody.innerHTML = "";
+        EVENTS.sort((a,b) => a.y - b.y).forEach(e => {
+            let row = `<tr>
+                <td>${getDecimalDate(e.y)}</td>
+                <td>${e.y.toFixed(2)}</td>
+                <td>${e.type}</td>
+                <td>${e.desc}</td>
+            </tr>`;
+            tbody.innerHTML += row;
+        });
+    }
+    
+    // --- TOOLTIP IMPLEMENTATION ---
+    function handleMouseMove(e) {
+        let rect = canvas.getBoundingClientRect();
+        let mouseX = e.clientX - rect.left;
+        let mouseY = e.clientY - rect.top;
+        let year = startY + (mouseX / pxPerYear);
+        
+        let tooltip = document.getElementById('tooltip');
+        tooltip.style.display = 'block';
+
+        const EVENT_MARKER_SIZE_CHECK = EVENT_MARKER_SIZE + 6; 
+        let nearEvent = EVENTS.find(e => {
+            if (e.xPos === undefined || e.y < startY || e.y > endY) return false; 
+            const dx = mouseX - e.xPos;
+            const dy = mouseY - e.yPos;
+            return Math.sqrt(dx * dx + dy * dy) < EVENT_MARKER_SIZE_CHECK; 
+        });
+
+        if (nearEvent) {
+            // --- Event Hit Logic: Display Event Info + Advice ---
+            let val = get86Value(nearEvent.y);
+            let phase = getPhaseInfo(nearEvent.y);
+            let advice = getAssetAdvice(val, phase.isPrivate);
+            let dateStr = getDecimalDate(nearEvent.y);
+
+            tooltip.innerHTML = `
+                <div class="event-title">${nearEvent.type} Event</div>
+                <div style="font-size: 14px;">Date: ${dateStr} (${nearEvent.y.toFixed(2)})</div>
+                <div class="event-desc">${nearEvent.desc}</div>
+                
+                <div class="tooltip-value">8.6y Cycle Value: ${val.toFixed(2)} (${phase.name.split(' (')[0]})</div>
+                
+                <div class="tooltip-advice" style="border-top: 1px dashed #666;">
+                    <strong class="event-advice-header">Investment Advice at Time:</strong>
+                    <div><strong>Real Estate:</strong> <span>${advice.realEstate}</span></div>
+                    <div><strong>Stocks:</strong> <span>${advice.stocks}</span></div>
+                    <div><strong>Gold:</strong> <span>${advice.gold}</span></div>
+                    <div><strong>Bonds:</strong> <span>${advice.bonds}</span></div>
+                    <div><strong>Cash:</strong> <span>${advice.cash}</span></div>
+                </div>
+            `;
+        } else if (year >= startY && year <= endY) {
+            // --- Normal Hover Logic: Display Current Hover Advice ---
+            let val = get86Value(year);
+            let phase = getPhaseInfo(year);
+            let advice = getAssetAdvice(val, phase.isPrivate);
+            let dateStr = getDecimalDate(year);
+            
+            tooltip.innerHTML = `
+                <strong>Date: ${dateStr} (${year.toFixed(2)})</strong>
+                <div class="tooltip-value">8.6y Cycle Value: ${val.toFixed(2)}</div>
+                <div style="color: ${phase.labelColor};">${phase.name.split(' (')[0]}</div>
+                
+                <div class="tooltip-advice">
+                    <strong>Investment Advice:</strong>
+                    <div><strong>Real Estate:</strong> <span>${advice.realEstate}</span></div>
+                    <div><strong>Stocks:</strong> <span>${advice.stocks}</span></div>
+                    <div><strong>Gold:</strong> <span>${advice.gold}</span></div>
+                    <div><strong>Bonds:</strong> <span>${advice.bonds}</span></div>
+                    <div><strong>Cash:</strong> <span>${advice.cash}</span></div>
+                </div>
+            `;
+        } else {
+            tooltip.style.display = 'none';
+            return;
+        }
+        
+        // 3. Position Tooltip
+        let newX = e.pageX + 15;
+        let newY = e.pageY - 10;
+        
+        if (newX + tooltip.offsetWidth > window.innerWidth) {
+            newX = e.pageX - tooltip.offsetWidth - 15;
+        }
+        if (newY < 0) {
+            newY = e.pageY + 15;
+        }
+
+        tooltip.style.left = newX + 'px';
+        tooltip.style.top = newY + 'px';
+    }
+
+    // Init
+    window.onload = init;
+</script>
+
+</body>
+</html>
